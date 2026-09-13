@@ -1,0 +1,16 @@
+[Unit]
+Description=Engineering Day Coding Challenge FastAPI Service
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/var/www/engday-backend
+ExecStart=/var/www/engday-backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 4
+Restart=always
+RestartSec=5
+Environment=DATABASE_URL=sqlite:///./sql_app.db
+Environment=SECRET_KEY=engday2026_super_secret_key_production
+Environment=JWT_SECRET=engday2026_jwt_secret_key_production
+
+[Install]
+WantedBy=multi-user.target
