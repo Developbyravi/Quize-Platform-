@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useAuth } from '@/context/AuthContext';
 import { fetchApi } from '@/lib/api';
-import { Shield, Lock, Power, Users, FileCode, Trophy, Settings, HelpCircle, CheckCircle, AlertTriangle } from 'lucide-react';
+import { Shield, Lock, Power, Users, FileCode, Trophy, Settings, HelpCircle, CheckCircle, AlertTriangle, Activity, RefreshCw } from 'lucide-react';
 
 interface Stats {
   total_participants: number;
@@ -18,11 +18,24 @@ interface Stats {
   highest_score: number;
 }
 
+interface ActivityLogItem {
+  id: number;
+  user_id: number;
+  user_email?: string;
+  event_type: string;
+  round_id?: number;
+  question_id?: number;
+  timestamp: string;
+  metadata_json?: string;
+  ip_address?: string;
+}
+
 export default function AdminConsolePage() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
 
   const [stats, setStats] = useState<Stats | null>(null);
+  const [activities, setActivities] = useState<ActivityLogItem[]>([]);
   const [maintenance, setMaintenance] = useState(false);
   const [locked, setLocked] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -34,6 +47,15 @@ export default function AdminConsolePage() {
     }
     if (user && user.role === 'admin') {
       loadAdminOverview();
+      loadLiveActivity();
+
+      // Directives: 3-second polling for real-time monitoring
+      const interval = setInterval(() => {
+        loadAdminOverview();
+        loadLiveActivity();
+      }, 3000);
+
+      return () => clearInterval(interval);
     }
   }, [user, isLoading, router]);
 
@@ -45,10 +67,25 @@ export default function AdminConsolePage() {
       const st = await fetchApi('/admin/settings');
       setMaintenance(st.maintenance_mode);
       setLocked(st.lock_all_participants);
-    } catch (e) {
+    } catch (e: any) {
       console.error('Failed to load admin overview:', e);
+      if (e?.message?.includes('privileges required') || e?.message?.includes('authenticated')) {
+        router.push('/admin/login');
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadLiveActivity = async () => {
+    try {
+      const data = await fetchApi('/admin/activity?limit=30');
+      setActivities(data);
+    } catch (e: any) {
+      console.error('Failed to load live activity stream:', e);
+      if (e?.message?.includes('privileges required') || e?.message?.includes('authenticated')) {
+        router.push('/admin/login');
+      }
     }
   };
 
@@ -85,7 +122,7 @@ export default function AdminConsolePage() {
           <h1 className="text-3xl font-extrabold text-white flex items-center gap-3">
             <Shield className="w-8 h-8 text-purple-400" /> Administrator Console
           </h1>
-          <p className="text-xs text-gray-400 mt-1">Global Competition Control Panel & Real-time Metrics</p>
+          <p className="text-xs text-gray-400 mt-1">Global Competition Control Panel & Real-time Activity Monitoring</p>
         </div>
 
         {/* Navigation Tabs */}
@@ -186,6 +223,46 @@ export default function AdminConsolePage() {
           <span className="text-xs font-mono text-gray-400 uppercase font-semibold">Highest Score</span>
           <div className="text-3xl font-extrabold text-amber-400 mt-1">{stats?.highest_score}</div>
           <span className="text-xs text-amber-500/80 mt-1 block">Current Leader</span>
+        </div>
+      </div>
+
+      {/* Real-time Activity Feed Stream */}
+      <div className="bg-gray-900 border border-gray-800 rounded-3xl p-6 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between border-b border-gray-800 pb-3">
+          <div className="flex items-center gap-2">
+            <Activity className="w-5 h-5 text-purple-400 animate-pulse" />
+            <h3 className="text-lg font-bold text-white">Live Activity Feed Stream</h3>
+          </div>
+          <span className="text-xs font-mono text-emerald-400 font-semibold flex items-center gap-1.5">
+            <RefreshCw className="w-3.5 h-3.5 animate-spin text-emerald-400" /> Polling Live (3s)
+          </span>
+        </div>
+
+        <div className="bg-[#0d1117] border border-gray-800 rounded-2xl p-4 font-mono text-xs max-h-72 overflow-y-auto space-y-2">
+          {activities.length === 0 ? (
+            <span className="text-gray-500">No competition activities recorded yet.</span>
+          ) : (
+            activities.map((act) => {
+              const timeStr = act.timestamp ? new Date(act.timestamp).toLocaleTimeString() : '';
+              let badgeColor = "text-blue-400";
+              if (act.event_type.includes("AUTO") || act.event_type.includes("TAB")) badgeColor = "text-red-400 font-bold";
+              if (act.event_type.includes("SUBMIT")) badgeColor = "text-emerald-400 font-bold";
+
+              return (
+                <div key={act.id} className="flex items-start justify-between border-b border-gray-900 pb-1.5 pt-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-500 font-bold">[{timeStr}]</span>
+                    <span className="text-white font-semibold">{act.user_email || `User #${act.user_id}`}</span>
+                    <span className={`${badgeColor}`}>{act.event_type}</span>
+                    {act.round_id && <span className="text-gray-400">(Round {act.round_id})</span>}
+                  </div>
+                  {act.metadata_json && (
+                    <span className="text-gray-500 text-[11px] truncate max-w-xs">{act.metadata_json}</span>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 

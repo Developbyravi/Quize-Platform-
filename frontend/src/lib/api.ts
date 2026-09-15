@@ -1,4 +1,4 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8001/api';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 
 export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
@@ -20,7 +20,19 @@ export async function fetchApi(endpoint: string, options: RequestInit = {}) {
   const data = await response.json().catch(() => null);
 
   if (!response.ok) {
-    const errorMsg = data?.detail || data?.message || 'An unexpected error occurred.';
+    let errorMsg = 'An unexpected error occurred.';
+    if (typeof data?.detail === 'string') {
+      errorMsg = data.detail;
+    } else if (Array.isArray(data?.detail)) {
+      errorMsg = data.detail
+        .map((err: any) => {
+          const field = Array.isArray(err.loc) ? err.loc[err.loc.length - 1] : '';
+          return field ? `${field}: ${err.msg}` : err.msg;
+        })
+        .join(' | ');
+    } else if (data?.message) {
+      errorMsg = data.message;
+    }
     throw new Error(errorMsg);
   }
 

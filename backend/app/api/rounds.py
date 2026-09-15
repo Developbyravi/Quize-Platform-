@@ -109,11 +109,13 @@ def get_current_attempt(id: int, db: Session = Depends(get_db), current_user: Us
 
     rnd = db.query(Round).filter(Round.id == id).first()
     if not rnd:
+        rnd = db.query(Round).filter(Round.round_number == id).first()
+    if not rnd:
         raise HTTPException(status_code=404, detail="Round not found.")
 
     attempt = db.query(RoundAttempt).filter(
         RoundAttempt.participant_id == participant.id,
-        RoundAttempt.round_id == id
+        RoundAttempt.round_id == rnd.id
     ).first()
 
     if not attempt:
@@ -130,3 +132,95 @@ def get_current_attempt(id: int, db: Session = Depends(get_db), current_user: Us
         "is_submitted": attempt.is_submitted,
         "score": attempt.score
     }
+
+@router.get("/{id}/status")
+def get_round_status(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    check_contest_accessible(db, current_user)
+    participant = current_user.participant_profile
+    if not participant:
+        raise HTTPException(status_code=403, detail="Participant profile required.")
+
+    rnd = db.query(Round).filter(Round.id == id).first()
+    if not rnd:
+        rnd = db.query(Round).filter(Round.round_number == id).first()
+    if not rnd:
+        raise HTTPException(status_code=404, detail="Round not found.")
+
+    attempt = db.query(RoundAttempt).filter(
+        RoundAttempt.participant_id == participant.id,
+        RoundAttempt.round_id == rnd.id
+    ).first()
+
+    if not attempt:
+        return {"status": "NOT_STARTED", "is_submitted": False, "remaining_seconds": 0}
+
+    remaining = get_remaining_seconds(attempt, rnd)
+
+    return {
+        "status": "SUBMITTED" if attempt.is_submitted else "ACTIVE",
+        "is_submitted": attempt.is_submitted,
+        "submission_type": attempt.submission_type or "NORMAL",
+        "remaining_seconds": remaining,
+        "score": attempt.score
+    }
+
+@router.post("/{id}/auto-submit")
+def auto_submit_round(id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    check_contest_accessible(db, current_user)
+    participant = current_user.participant_profile
+    if not participant:
+        raise HTTPException(status_code=403, detail="Participant profile required.")
+
+    rnd = db.query(Round).filter(Round.id == id).first()
+    if not rnd:
+        rnd = db.query(Round).filter(Round.round_number == id).first()
+    if not rnd:
+        raise HTTPException(status_code=404, detail="Round not found.")
+
+    attempt = db.query(RoundAttempt).filter(
+        RoundAttempt.participant_id == participant.id,
+        RoundAttempt.round_id == rnd.id
+    ).first()
+
+    if not attempt:
+        raise HTTPException(status_code=404, detail="No attempt found for this round.")
+
+    # Idempotent check: if already submitted, return current state safely
+    if attempt.is_submitted:
+        return {
+            "status": "submitted",
+            "submission_type": attempt.submission_type or "TAB_SWITCH",
+            "score": attempt.score,
+            "message": "Round was already submitted."
+        }
+
+    # Atomically mark as auto-submitted via TAB_SWITCH
+    attempt.is_submitted = True
+    attempt.submitted_at = datetime.now(timezone.utc)
+    attempt.submission_type = "TAB_SWITCH"
+    db.commit()
+
+    # Recalculate score & log activity
+    from app.services.scoring import update_participant_score
+    from app.models.activity import ActivityLog
+
+    update_participant_score(db, participant.id)
+
+    log = ActivityLog(
+        user_id=current_user.id,
+        event_type="AUTO_SUBMITTED",
+        round_id=rnd.id,
+        metadata_json='{"reason": "TAB_SWITCH", "submission_type": "TAB_SWITCH"}'
+    )
+    db.add(log)
+    db.commit()
+
+    log_event("AUTO_SUBMITTED", f"Participant {participant.id} Round {rnd.round_number} auto-submitted via TAB_SWITCH.", participant.id)
+
+    return {
+        "status": "submitted",
+        "submission_type": "TAB_SWITCH",
+        "score": attempt.score,
+        "message": "Your round has been automatically submitted because you left the competition tab."
+    }
+

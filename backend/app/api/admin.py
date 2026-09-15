@@ -14,10 +14,17 @@ from app.models.setting import ContestSettings
 from app.schemas.round import RoundStatusUpdate
 from app.schemas.setting import ContestSettingsOut, ContestSettingsUpdate
 from app.schemas.question import QuestionCreateUpdate, QuestionOutAdmin
+from pydantic import BaseModel
+from app.models.activity import ActivityLog
 from app.api.auth import get_current_admin
 from app.core.security import get_password_hash
 from app.utils.backup import export_database_snapshot
 from app.core.logging import log_event
+from app.services.scoring import update_participant_score
+
+class ForceSubmitRequest(BaseModel):
+    round_id: int
+    reason: str
 
 router = APIRouter(prefix="/admin", tags=["Admin Dashboard"])
 
@@ -475,4 +482,151 @@ def duplicate_question(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to duplicate question: {str(e)}")
+
+
+# --- Live Activity & Force Submit Endpoints ---
+
+@router.get("/activity")
+def get_admin_activity_feed(
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    logs = db.query(ActivityLog).order_by(desc(ActivityLog.timestamp)).limit(limit).all()
+    res = []
+    for l in logs:
+        res.append({
+            "id": l.id,
+            "user_id": l.user_id,
+            "user_email": l.user.email if l.user else None,
+            "event_type": l.event_type,
+            "round_id": l.round_id,
+            "question_id": l.question_id,
+            "timestamp": l.timestamp.isoformat() if l.timestamp else None,
+            "metadata_json": l.metadata_json,
+            "ip_address": l.ip_address
+        })
+    return res
+
+
+@router.get("/activity/{user_id}")
+def get_user_activity_timeline(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    logs = db.query(ActivityLog).filter(ActivityLog.user_id == user_id).order_by(desc(ActivityLog.timestamp)).all()
+    res = []
+    for l in logs:
+        res.append({
+            "id": l.id,
+            "user_id": l.user_id,
+            "event_type": l.event_type,
+            "round_id": l.round_id,
+            "question_id": l.question_id,
+            "timestamp": l.timestamp.isoformat() if l.timestamp else None,
+            "metadata_json": l.metadata_json,
+            "ip_address": l.ip_address
+        })
+    return res
+
+
+@router.post("/participants/{id}/force-submit")
+def force_submit_participant_round(
+    id: int,
+    data: ForceSubmitRequest,
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    p = db.query(Participant).filter(Participant.id == id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Participant not found.")
+
+    attempt = db.query(RoundAttempt).filter(
+        RoundAttempt.participant_id == p.id,
+        RoundAttempt.round_id == data.round_id
+    ).first()
+
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Round attempt not found for this participant.")
+
+    attempt.is_submitted = True
+    attempt.submitted_at = datetime.now(timezone.utc)
+    attempt.submission_type = "ADMIN_FORCED"
+    db.commit()
+
+    update_participant_score(db, p.id)
+
+    log = ActivityLog(
+        user_id=p.user_id,
+        event_type="ADMIN_FORCED_SUBMISSION",
+        round_id=data.round_id,
+        metadata_json=f'{{"admin_id": {current_admin.id}, "reason": "{data.reason}"}}'
+    )
+    db.add(log)
+    db.commit()
+
+    log_event("ADMIN_FORCED_SUBMISSION", f"Admin {current_admin.id} force submitted participant {p.id} Round {data.round_id}. Reason: {data.reason}", current_admin.id)
+
+    return {
+        "message": f"Participant's Round {data.round_id} has been force-submitted.",
+        "status": "submitted",
+        "submission_type": "ADMIN_FORCED",
+        "reason": data.reason
+    }
+
+
+@router.get("/statistics")
+def get_contest_statistics(
+    db: Session = Depends(get_db),
+    current_admin: User = Depends(get_current_admin)
+):
+    # Round 1 stats
+    r1_questions = db.query(Question).filter(Question.round_id == 1).all()
+    r1_stats = []
+    for q in r1_questions:
+        ans_list = db.query(QuizAnswer).filter(QuizAnswer.question_id == q.id).all()
+        total_ans = len(ans_list)
+        correct_ans = sum(1 for a in ans_list if a.is_correct)
+        incorrect_ans = total_ans - correct_ans
+        r1_stats.append({
+            "question_id": q.id,
+            "title": q.title,
+            "order_index": q.order_index,
+            "total_answers": total_ans,
+            "correct": correct_ans,
+            "incorrect": incorrect_ans,
+            "accuracy": round((correct_ans / total_ans * 100), 1) if total_ans > 0 else 0.0
+        })
+
+    # Round 2 & 3 stats
+    def coding_stats(round_id: int):
+        q_list = db.query(Question).filter(Question.round_id == round_id).all()
+        res = []
+        for q in q_list:
+            subs = db.query(Submission).filter(Submission.question_id == q.id).all()
+            total_subs = len(subs)
+            accepted_subs = sum(1 for s in subs if s.status == "ACCEPTED")
+            comp_errs = sum(1 for s in subs if s.status == "COMPILATION_ERROR")
+            runtime_errs = sum(1 for s in subs if s.status == "RUNTIME_ERROR")
+            avg_score = (sum(s.score for s in subs) / total_subs) if total_subs > 0 else 0.0
+            res.append({
+                "question_id": q.id,
+                "title": q.title,
+                "order_index": q.order_index,
+                "total_submissions": total_subs,
+                "accepted": accepted_subs,
+                "compilation_errors": comp_errs,
+                "runtime_errors": runtime_errs,
+                "average_score": round(avg_score, 2),
+                "max_marks": q.marks
+            })
+        return res
+
+    return {
+        "round1_mcq_stats": r1_stats,
+        "round2_debug_stats": coding_stats(2),
+        "round3_coding_stats": coding_stats(3)
+    }
+
 

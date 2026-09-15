@@ -31,29 +31,24 @@ export default function CodeEditor({
 }: CodeEditorProps) {
   const [lastSaved, setLastSaved] = useState<string>('');
   const [isSaved, setIsSaved] = useState<boolean>(true);
-  const codeRef = useRef(code);
-
-  codeRef.current = code;
-
-  // 15-second interval autosave
-  useEffect(() => {
-    if (readOnly || !onAutosave) return;
-
-    const interval = setInterval(() => {
-      if (codeRef.current) {
-        onAutosave(codeRef.current);
-        setIsSaved(true);
-        setLastSaved(new Date().toLocaleTimeString());
-      }
-    }, 15000);
-
-    return () => clearInterval(interval);
-  }, [onAutosave, readOnly]);
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleEditorChange = (val?: string) => {
     const newCode = val || '';
     onChange(newCode);
     setIsSaved(false);
+
+    if (readOnly || !onAutosave) return;
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    debounceTimerRef.current = setTimeout(() => {
+      onAutosave(newCode);
+      setIsSaved(true);
+      setLastSaved(new Date().toLocaleTimeString());
+    }, 2500);
   };
 
   return (

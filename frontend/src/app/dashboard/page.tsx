@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
 import { fetchApi } from '@/lib/api';
-import { Lock, Play, CheckCircle2, Clock, Trophy, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Lock, Play, CheckCircle2, Clock, Trophy, AlertTriangle, ShieldAlert } from 'lucide-react';
 
 interface RoundItem {
   id: number;
@@ -22,6 +22,11 @@ export default function ParticipantDashboard() {
   const [rounds, setRounds] = useState<RoundItem[]>([]);
   const [error, setError] = useState<string>('');
   const [loadingData, setLoadingData] = useState(true);
+
+  // Pre-round rule acknowledgment modal state
+  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+  const [selectedRound, setSelectedRound] = useState<number | null>(null);
+  const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -44,8 +49,16 @@ export default function ParticipantDashboard() {
     }
   };
 
-  const handleEnterRound = (roundNumber: number) => {
-    router.push(`/rounds/${roundNumber}`);
+  const handleOpenRuleModal = (roundNumber: number) => {
+    setSelectedRound(roundNumber);
+    setAcknowledged(false);
+    setRuleModalOpen(true);
+  };
+
+  const handleConfirmStart = () => {
+    if (!selectedRound || !acknowledged) return;
+    setRuleModalOpen(false);
+    router.push(`/rounds/${selectedRound}`);
   };
 
   if (isLoading || loadingData) {
@@ -129,7 +142,7 @@ export default function ParticipantDashboard() {
               <div className="pt-6">
                 {isActive ? (
                   <button
-                    onClick={() => handleEnterRound(rnd.round_number)}
+                    onClick={() => handleOpenRuleModal(rnd.round_number)}
                     className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2 text-sm"
                   >
                     <Play className="w-4 h-4 fill-white" /> Enter Round {rnd.round_number}
@@ -154,6 +167,58 @@ export default function ParticipantDashboard() {
           );
         })}
       </div>
+
+      {/* Mandatory Tab-Switch Rule Acknowledgment Modal */}
+      {ruleModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-gray-900 border-2 border-red-600/80 rounded-3xl p-6 sm:p-8 max-w-lg w-full shadow-2xl space-y-5">
+            <div className="flex items-center gap-3 text-red-500 border-b border-gray-800 pb-4">
+              <ShieldAlert className="w-8 h-8 shrink-0" />
+              <div>
+                <span className="text-xs font-mono font-bold uppercase text-red-400 tracking-wider">Mandatory Competition Rule</span>
+                <h2 className="text-xl font-extrabold text-white">IMPORTANT COMPETITION RULE</h2>
+              </div>
+            </div>
+
+            <div className="bg-red-950/40 border border-red-900/60 rounded-2xl p-4 text-sm text-gray-200 leading-relaxed font-sans">
+              <p className="font-semibold text-red-300 mb-2">
+                "Do not change browser tabs or leave the competition page during an active round.
+              </p>
+              <p className="text-gray-300 text-xs">
+                If you leave or switch away from the competition tab, your current round will be <strong className="text-red-400 font-bold uppercase">automatically submitted</strong> immediately and locked."
+              </p>
+            </div>
+
+            <label className="flex items-start gap-3 p-3 bg-gray-950 border border-gray-800 rounded-xl cursor-pointer hover:border-gray-700">
+              <input
+                type="checkbox"
+                checked={acknowledged}
+                onChange={(e) => setAcknowledged(e.target.checked)}
+                className="mt-1 w-4 h-4 rounded border-gray-700 text-blue-600 focus:ring-blue-500 bg-gray-900"
+              />
+              <span className="text-xs text-gray-300 leading-snug">
+                I understand and agree to the competition rules. I acknowledge that leaving or switching browser tabs during an active round will immediately auto-submit my attempt.
+              </span>
+            </label>
+
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                onClick={() => setRuleModalOpen(false)}
+                className="w-1/2 py-3 bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold rounded-xl text-sm transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!acknowledged}
+                onClick={handleConfirmStart}
+                className="w-1/2 py-3 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold rounded-xl text-sm transition-all shadow-lg shadow-blue-600/30 flex items-center justify-center gap-2"
+              >
+                <Play className="w-4 h-4 fill-white" /> Start Round {selectedRound}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import os
 from pydantic_settings import BaseSettings
-from typing import List, Union
+from typing import List, Union, Optional
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Engineering Day Coding Challenge"
@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     JWT_SECRET: str = "engday2026_jwt_secret_key_change_in_production_987654321"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    ADMIN_EMAIL: Optional[str] = None
+    ADMIN_PASSWORD: Optional[str] = None
     
     # Database
     DATABASE_URL: str = "sqlite:///./sql_app.db"
@@ -31,7 +33,7 @@ class Settings(BaseSettings):
         "http://localhost:3000",
         "http://localhost:3001",
         "http://127.0.0.1:3000",
-        "*"
+        "http://127.0.0.1:3001"
     ]
     
     class Config:

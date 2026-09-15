@@ -1,71 +1,88 @@
 "use client";
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { fetchApi } from '@/lib/api';
-import { AlertTriangle, X } from 'lucide-react';
+import { AlertTriangle, Lock } from 'lucide-react';
 
-export default function AntiCheatNotifier() {
-  const [warningOpen, setWarningOpen] = useState(false);
-  const [warningCount, setWarningCount] = useState(0);
+interface AntiCheatNotifierProps {
+  roundId?: number;
+  onAutoSubmitted?: () => void;
+}
+
+export default function AntiCheatNotifier({ roundId, onAutoSubmitted }: AntiCheatNotifierProps) {
+  const router = useRouter();
+  const [autoSubmitted, setAutoSubmitted] = useState(false);
+  const [warningMessage, setWarningMessage] = useState('');
 
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        logViolation("TAB_SWITCH", "Participant switched tab or minimized window.");
+    const handleVisibilityChange = async () => {
+      // Directives: The ONLY automatic tab-switch submission trigger is document.visibilityState === "hidden"
+      if (document.visibilityState === "hidden" && roundId && !autoSubmitted) {
+        try {
+          // Log page hidden activity
+          fetchApi("/activity", {
+            method: "POST",
+            body: JSON.stringify({ event_type: "PAGE_HIDDEN", round_id: roundId })
+          }).catch(() => {});
+
+          // Call authoritative auto-submit endpoint
+          const res = await fetchApi(`/rounds/${roundId}/auto-submit`, {
+            method: "POST"
+          });
+
+          setAutoSubmitted(true);
+          setWarningMessage(res.message || "Your round has been automatically submitted because you left the competition tab.");
+          if (onAutoSubmitted) onAutoSubmitted();
+        } catch (e: any) {
+          console.error("Auto-submit request failed:", e);
+        }
       }
     };
 
     const handleBlur = () => {
-      logViolation("WINDOW_BLUR", "Participant window lost focus.");
+      // Directives: window.blur must NOT trigger auto-submission.
+      // It may only generate an optional lightweight activity event.
+      if (roundId) {
+        fetchApi("/activity", {
+          method: "POST",
+          body: JSON.stringify({ event_type: "WINDOW_BLUR", round_id: roundId })
+        }).catch(() => {});
+      }
     };
 
-    window.addEventListener("visibilitychange", handleVisibilityChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
 
     return () => {
-      window.removeEventListener("visibilitychange", handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
     };
-  }, []);
+  }, [roundId, autoSubmitted, onAutoSubmitted]);
 
-  const logViolation = async (type: string, details: string) => {
-    try {
-      const res = await fetchApi("/violations", {
-        method: "POST",
-        body: JSON.stringify({ violation_type: type, details })
-      });
-      setWarningCount(res.total_violations || 1);
-      setWarningOpen(true);
-    } catch (e) {
-      console.error("Failed to log anti-cheating violation:", e);
-    }
-  };
-
-  if (!warningOpen) return null;
+  if (!autoSubmitted) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-gray-900 border-2 border-red-600 rounded-2xl p-6 max-w-md w-full shadow-2xl animate-shake">
-        <div className="flex items-center gap-3 text-red-500 mb-3">
-          <AlertTriangle className="w-8 h-8" />
-          <h2 className="text-xl font-bold text-white">Cheating Warning Detected!</h2>
+    <div className="fixed inset-0 z-50 bg-black/90 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="bg-gray-900 border-2 border-red-600 rounded-3xl p-6 max-w-md w-full shadow-2xl space-y-4 text-center">
+        <div className="w-16 h-16 bg-red-950/80 border-2 border-red-600 rounded-full flex items-center justify-center mx-auto text-red-500 animate-pulse">
+          <Lock className="w-8 h-8" />
         </div>
 
-        <p className="text-sm text-gray-300 mb-4 leading-relaxed">
-          Leaving or switching away from the competition window has been detected and logged.
+        <div className="space-y-1">
+          <h2 className="text-xl font-extrabold text-white">Round Automatically Submitted</h2>
+          <span className="text-xs font-mono font-bold text-red-400 uppercase tracking-wider">Tab Switch Violation Detected</span>
+        </div>
+
+        <p className="text-sm text-gray-300 leading-relaxed bg-red-950/40 border border-red-900/60 p-4 rounded-2xl">
+          {warningMessage}
         </p>
 
-        <div className="bg-red-950/50 border border-red-800 rounded-xl p-3 mb-6 text-center">
-          <span className="text-xs font-mono text-red-300 font-semibold block uppercase">Total Violations Recorded</span>
-          <span className="text-3xl font-extrabold text-red-400 font-mono">{warningCount}</span>
-          <span className="text-xs text-red-400/80 block mt-1">Further violations may result in immediate disqualification.</span>
-        </div>
-
         <button
-          onClick={() => setWarningOpen(false)}
-          className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-colors shadow-lg shadow-red-600/30 flex items-center justify-center gap-2"
+          onClick={() => router.push('/dashboard')}
+          className="w-full py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-red-600/30 text-sm"
         >
-          <span>I Understand & Resume Competition</span>
+          Return to Dashboard
         </button>
       </div>
     </div>

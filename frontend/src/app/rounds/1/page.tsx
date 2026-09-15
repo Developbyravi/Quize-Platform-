@@ -41,6 +41,11 @@ export default function Round1Page() {
       router.push('/login');
       return;
     }
+    if (user?.role === 'admin') {
+      setError('You are currently logged in as an Administrator. Administrator accounts cannot participate in competition rounds. Please log in with a Participant account.');
+      setLoading(false);
+      return;
+    }
     if (user) {
       initRound1();
     }
@@ -162,7 +167,7 @@ export default function Round1Page() {
 
   return (
     <div className="space-y-6 py-2">
-      <AntiCheatNotifier />
+      <AntiCheatNotifier roundId={1} />
 
       {/* Header Bar */}
       <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">

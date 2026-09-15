@@ -30,6 +30,7 @@ class RoundAttempt(Base):
     end_time = Column(DateTime, nullable=True) # Expected max end time
     submitted_at = Column(DateTime, nullable=True)
     is_submitted = Column(Boolean, default=False, index=True)
+    submission_type = Column(String(50), default="NORMAL", nullable=True) # NORMAL, TIME_EXPIRED, TAB_SWITCH, ADMIN_FORCED
     score = Column(Float, default=0.0)
     
     participant = relationship("Participant", back_populates="attempts")

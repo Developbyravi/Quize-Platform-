@@ -16,6 +16,7 @@ from app.api.code import router as code_router
 from app.api.leaderboard import router as leaderboard_router
 from app.api.violations import router as violations_router
 from app.api.admin import router as admin_router
+from app.api.activity import router as activity_router
 
 setup_logging()
 
@@ -25,6 +26,12 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
+        from sqlalchemy import text
+        try:
+            db.execute(text("ALTER TABLE round_attempts ADD COLUMN submission_type VARCHAR(50)"))
+            db.commit()
+        except Exception:
+            db.rollback()
         seed_database(db)
     finally:
         db.close()
@@ -41,6 +48,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"http://.*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -54,6 +62,7 @@ app.include_router(code_router, prefix=settings.API_V1_STR)
 app.include_router(leaderboard_router, prefix=settings.API_V1_STR)
 app.include_router(violations_router, prefix=settings.API_V1_STR)
 app.include_router(admin_router, prefix=settings.API_V1_STR)
+app.include_router(activity_router, prefix=settings.API_V1_STR)
 
 @app.get("/")
 def root():

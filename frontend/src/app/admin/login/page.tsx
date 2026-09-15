@@ -61,7 +61,7 @@ export default function AdminLoginPage() {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@engday.edu"
+                placeholder="admin@example.com"
                 className="w-full bg-gray-950 border border-gray-800 rounded-xl pl-9 pr-4 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-purple-500"
               />
             </div>
@@ -93,7 +93,7 @@ export default function AdminLoginPage() {
         </form>
 
         <div className="text-center text-xs text-gray-500 border-t border-gray-800 pt-4">
-          Development seed credentials: <code className="text-purple-400 font-mono">admin@engday.edu</code> / <code className="text-purple-400 font-mono">admin123</code>
+          Enter administrator email & password configured in <code className="text-purple-400 font-mono">.env</code>
         </div>
       </div>
     </div>

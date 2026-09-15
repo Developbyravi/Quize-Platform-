@@ -4,6 +4,7 @@ from app.models.round import Round
 from app.models.question import Question, QuestionOption, TestCase
 from app.models.setting import ContestSettings
 from app.core.security import get_password_hash
+from app.core.config import settings as app_settings
 from app.core.logging import log_event
 
 def seed_database(db: Session):
@@ -22,237 +23,291 @@ def seed_database(db: Session):
         )
         db.add(settings)
 
-    # 2. Seed Admin User
-    admin = db.query(User).filter(User.email == "admin@engday.edu").first()
-    if not admin:
-        admin = User(
-            email="admin@engday.edu",
-            hashed_password=get_password_hash("admin123"),
-            role="admin",
-            is_active=True
-        )
-        db.add(admin)
+    # 2. Seed Admin User idempotently from environment variables
+    admin_email = (app_settings.ADMIN_EMAIL or "kr2932429@gmail.com").lower()
+    admin_password = app_settings.ADMIN_PASSWORD or "11rr@@TT"
 
-    # 3. Seed 3 Contest Rounds
+    user_with_email = db.query(User).filter(User.email == admin_email).first()
+    if user_with_email:
+        user_with_email.role = "admin"
+        user_with_email.hashed_password = get_password_hash(admin_password)
+        user_with_email.is_active = True
+    else:
+        existing_admin = db.query(User).filter(User.role == "admin").first()
+        if existing_admin:
+            existing_admin.email = admin_email
+            existing_admin.hashed_password = get_password_hash(admin_password)
+            existing_admin.is_active = True
+        else:
+            new_admin = User(
+                email=admin_email,
+                hashed_password=get_password_hash(admin_password),
+                role="admin",
+                is_active=True
+            )
+            db.add(new_admin)
+
+    db.query(User).filter(User.role == "admin", User.email != admin_email).update({"role": "participant"})
+    db.commit()
+
+    # 3. Seed 3 Contest Rounds with exact durations & max marks
     r1 = db.query(Round).filter(Round.round_number == 1).first()
     if not r1:
         r1 = Round(
             round_number=1,
             title="Round 1 — Coding Aptitude",
-            description="20 Multiple Choice Questions covering Programming Concepts, DSA, Time Complexity, OOP, C/C++, Java & Python.",
-            duration_minutes=20,
-            max_marks=100.0,
+            description="20 MCQ questions covering C, C++, Java, Python, OOP, DSA, Algorithms and OS concepts.",
+            duration_minutes=18,
+            max_marks=20.0,
             status="ACTIVE",
-            allow_negative_marking=True,
-            negative_mark_value=0.25
+            allow_negative_marking=False,
+            negative_mark_value=0.0
         )
         db.add(r1)
+    else:
+        r1.duration_minutes = 18
+        r1.max_marks = 20.0
+        r1.allow_negative_marking = False
+        r1.negative_mark_value = 0.0
 
     r2 = db.query(Round).filter(Round.round_number == 2).first()
     if not r2:
         r2 = Round(
             round_number=2,
             title="Round 2 — Debug the Code",
-            description="5 Debugging Challenges. Identify logic bugs, syntax issues, and memory leaks across C, C++, Java, and Python.",
-            duration_minutes=35,
-            max_marks=100.0,
+            description="3 Debugging Problems in C, Python, and C++. Identify logic/indexing bugs and pass automated test cases.",
+            duration_minutes=30,
+            max_marks=30.0,
             status="LOCKED"
         )
         db.add(r2)
+    else:
+        r2.duration_minutes = 30
+        r2.max_marks = 30.0
 
     r3 = db.query(Round).filter(Round.round_number == 3).first()
     if not r3:
         r3 = Round(
             round_number=3,
             title="Round 3 — Final Coding Challenge",
-            description="3 Algorithmic Programming Challenges ranging from Easy to Hard difficulty. Partial scoring based on passed test cases.",
-            duration_minutes=60,
-            max_marks=150.0,
+            description="2 Algorithmic Programming Challenges. Evaluated via visible and hidden test cases with partial scoring.",
+            duration_minutes=35,
+            max_marks=50.0,
             status="LOCKED"
         )
         db.add(r3)
+    else:
+        r3.duration_minutes = 35
+    r3.max_marks = 50.0
+
+    # Prune non-spec demo questions exceeding competition bounds (R1 > 20, R2 > 3, R3 > 2)
+    db.query(Question).filter(Question.round_id == 1, Question.order_index > 20).delete(synchronize_session=False)
+    db.query(Question).filter(Question.round_id == 2, Question.order_index > 3).delete(synchronize_session=False)
+    db.query(Question).filter(Question.round_id == 3, Question.order_index > 2).delete(synchronize_session=False)
 
     db.commit()
 
-    # 4. Seed Round 1 MCQs (20 Questions)
-    if db.query(Question).filter(Question.round_id == 1).count() == 0:
-        mcqs_data = [
-            {
-                "title": "C++ Post-increment Output",
-                "desc": "What is the output of the following C++ code snippet?",
-                "code": "#include <iostream>\nusing namespace std;\nint main() {\n    int x = 5;\n    cout << x++;\n    return 0;\n}",
-                "marks": 5.0,
-                "category": "C++",
-                "options": [("A", "4", False), ("B", "5", True), ("C", "6", False), ("D", "Compilation Error", False)]
-            },
-            {
-                "title": "Time Complexity of Binary Search",
-                "desc": "What is the worst-case time complexity of Binary Search on a sorted array of size N?",
-                "code": None,
-                "marks": 5.0,
-                "category": "DSA",
-                "options": [("A", "O(N)", False), ("B", "O(N log N)", False), ("C", "O(log N)", True), ("D", "O(1)", False)]
-            },
-            {
-                "title": "Python List Mutability",
-                "desc": "What will be printed after executing the following Python code?",
-                "code": "a = [1, 2, 3]\nb = a\nb.append(4)\nprint(len(a))",
-                "marks": 5.0,
-                "category": "Python",
-                "options": [("A", "3", False), ("B", "4", True), ("C", "Error", False), ("D", "None", False)]
-            },
-            {
-                "title": "Java Object Reference",
-                "desc": "In Java, what happens when an object reference is passed to a method?",
-                "code": None,
-                "marks": 5.0,
-                "category": "Java",
-                "options": [("A", "Passed by value of the reference", True), ("B", "Passed strictly by reference", False), ("C", "Object is cloned", False), ("D", "Compilation fails", False)]
-            },
-            {
-                "title": "Stack LIFO Principle",
-                "desc": "Which data structure follows the Last-In-First-Out (LIFO) property?",
-                "code": None,
-                "marks": 5.0,
-                "category": "DSA",
-                "options": [("A", "Queue", False), ("B", "Stack", True), ("C", "Array", False), ("D", "Tree", False)]
-            },
-            {
-                "title": "OOP Polymorphism Concept",
-                "desc": "Which OOP concept enables a single method name to behave differently depending on the calling object?",
-                "code": None,
-                "marks": 5.0,
-                "category": "OOP",
-                "options": [("A", "Encapsulation", False), ("B", "Abstraction", False), ("C", "Polymorphism", True), ("D", "Inheritance", False)]
-            },
-            {
-                "title": "C Pointer Dereference",
-                "desc": "What is the output of the following C code?",
-                "code": "#include <stdio.h>\nint main() {\n    int a = 10;\n    int *p = &a;\n    *p = 20;\n    printf(\"%d\", a);\n    return 0;\n}",
-                "marks": 5.0,
-                "category": "C",
-                "options": [("A", "10", False), ("B", "20", True), ("C", "Garbage value", False), ("D", "Address of a", False)]
-            },
-            {
-                "title": "Recursion Base Case",
-                "desc": "What happens if a recursive function lacks a proper base case?",
-                "code": None,
-                "marks": 5.0,
-                "category": "DSA",
-                "options": [("A", "Executes once and returns", False), ("B", "Stack Overflow Error", True), ("C", "Runs in O(1) time", False), ("D", "Returns 0", False)]
-            },
-            {
-                "title": "Python Dictionary Keys",
-                "desc": "Which of the following data types CANNOT be used as a key in a Python dictionary?",
-                "code": None,
-                "marks": 5.0,
-                "category": "Python",
-                "options": [("A", "Integer", False), ("B", "String", False), ("C", "Tuple", False), ("D", "List", True)]
-            },
-            {
-                "title": "C++ Destructor Syntax",
-                "desc": "How is a destructor declared in a C++ class named 'Student'?",
-                "code": None,
-                "marks": 5.0,
-                "category": "C++",
-                "options": [("A", "~Student()", True), ("B", "void Student()", False), ("C", "delete Student()", False), ("D", "Student(~)", False)]
-            },
-            {
-                "title": "Queue FIFO Principle",
-                "desc": "In a standard FIFO Queue, where are new elements inserted?",
-                "code": None,
-                "marks": 5.0,
-                "category": "DSA",
-                "options": [("A", "Front", False), ("B", "Rear", True), ("C", "Middle", False), ("D", "Top", False)]
-            },
-            {
-                "title": "Java Final Keyword",
-                "desc": "What does declaring a variable with the 'final' keyword in Java enforce?",
-                "code": None,
-                "marks": 5.0,
-                "category": "Java",
-                "options": [("A", "Variable becomes private", False), ("B", "Value cannot be modified once assigned", True), ("C", "Variable is stored on stack", False), ("D", "Variable is static", False)]
-            },
-            {
-                "title": "Quick Sort Worst Case Complexity",
-                "desc": "What is the worst-case time complexity of Quick Sort?",
-                "code": None,
-                "marks": 5.0,
-                "category": "Algorithms",
-                "options": [("A", "O(N log N)", False), ("B", "O(N^2)", True), ("C", "O(N)", False), ("D", "O(log N)", False)]
-            },
-            {
-                "title": "C String Terminator",
-                "desc": "What character is automatically appended to terminate a standard string in C?",
-                "code": None,
-                "marks": 5.0,
-                "category": "C",
-                "options": [("A", "\\n", False), ("B", "\\0", True), ("C", "\\t", False), ("D", "EOF", False)]
-            },
-            {
-                "title": "Python Generator Keyword",
-                "desc": "Which keyword is used to yield values incrementally in a Python generator function?",
-                "code": None,
-                "marks": 5.0,
-                "category": "Python",
-                "options": [("A", "return", False), ("B", "yield", True), ("C", "generate", False), ("D", "emit", False)]
-            },
-            {
-                "title": "Hash Table Collision Resolution",
-                "desc": "Which technique resolves hash table collisions by creating a linked list at each bucket?",
-                "code": None,
-                "marks": 5.0,
-                "category": "DSA",
-                "options": [("A", "Open Addressing", False), ("B", "Chaining", True), ("C", "Linear Probing", False), ("D", "Double Hashing", False)]
-            },
-            {
-                "title": "C++ Virtual Function",
-                "desc": "Why are virtual functions used in C++?",
-                "code": None,
-                "marks": 5.0,
-                "category": "C++",
-                "options": [("A", "To achieve runtime polymorphism", True), ("B", "To prevent class inheritance", False), ("C", "To speed up compilation", False), ("D", "To overload operators", False)]
-            },
-            {
-                "title": "Java Garbage Collection",
-                "desc": "Which part of Java Memory Architecture is managed by the Garbage Collector?",
-                "code": None,
-                "marks": 5.0,
-                "category": "Java",
-                "options": [("A", "Call Stack", False), ("B", "Heap Memory", True), ("C", "Method Area", False), ("D", "Program Counter", False)]
-            },
-            {
-                "title": "Graph Traversal BFS Data Structure",
-                "desc": "Which data structure is fundamentally used to implement Breadth-First Search (BFS)?",
-                "code": None,
-                "marks": 5.0,
-                "category": "DSA",
-                "options": [("A", "Stack", False), ("B", "Queue", True), ("C", "Priority Queue", False), ("D", "Array", False)]
-            },
-            {
-                "title": "Python Slicing Negative Step",
-                "desc": "What is the result of 'hello'[::-1] in Python?",
-                "code": None,
-                "marks": 5.0,
-                "category": "Python",
-                "options": [("A", "'hello'", False), ("B", "'olleh'", True), ("C", "'h'", False), ("D", "SyntaxError", False)]
-            }
-        ]
-        for i, m in enumerate(mcqs_data, 1):
+    # 4. Seed Round 1 MCQs (20 Questions - Verbatim from Notepad File)
+    mcqs_data = [
+        {
+            "order": 1,
+            "title": "Q1. C — Array Indexing",
+            "desc": "What is printed by the following code snippet?",
+            "code": "int arr[] = {10, 20, 30, 40};\n\nprintf(\"%d\", arr[1] + arr[3]);",
+            "category": "C",
+            "explanation": "arr[1] is 20, arr[3] is 40. 20 + 40 = 60.",
+            "options": [("A", "40", False), ("B", "50", False), ("C", "60", True), ("D", "70", False)]
+        },
+        {
+            "order": 2,
+            "title": "Q2. Python — len()",
+            "desc": "What is the output?",
+            "code": "x = [10, 20, [30, 40], 50]\nprint(len(x))",
+            "category": "Python",
+            "explanation": "[30, 40] is one nested list element. Total length is 4.",
+            "options": [("A", "4", True), ("B", "5", False), ("C", "3", False), ("D", "Error", False)]
+        },
+        {
+            "order": 3,
+            "title": "Q3. Java — Array Index",
+            "desc": "What is printed?",
+            "code": "int[] arr = {10, 20, 30, 40};\n\nSystem.out.println(arr[arr.length - 2]);",
+            "category": "Java",
+            "explanation": "arr.length is 4. arr[4 - 2] = arr[2] = 30.",
+            "options": [("A", "20", False), ("B", "30", True), ("C", "40", False), ("D", "2", False)]
+        },
+        {
+            "order": 4,
+            "title": "Q4. C++ — Default Access",
+            "desc": "Consider the code below. What happens?",
+            "code": "class Test {\n    int x = 10;\n};\n\nint main() {\n    Test t;\n    cout << t.x;\n}",
+            "category": "C++",
+            "explanation": "Members of a C++ class are private by default, causing a compilation error.",
+            "options": [("A", "Prints 10", False), ("B", "Prints 0", False), ("C", "Compilation error", True), ("D", "Runtime error", False)]
+        },
+        {
+            "order": 5,
+            "title": "Q5. Stack — LIFO",
+            "desc": "A stack initially contains: 10, 20, 30 where 30 is on top.\nOperations:\npop()\npush(40)\npop()\nWhat is on top after these operations?",
+            "code": None,
+            "category": "DSA",
+            "explanation": "pop() removes 30. push(40) adds 40 on top. pop() removes 40. 20 is left on top.",
+            "options": [("A", "10", False), ("B", "20", True), ("C", "30", False), ("D", "40", False)]
+        },
+        {
+            "order": 6,
+            "title": "Q6. C — Pass by Value",
+            "desc": "What is printed?",
+            "code": "void change(int x) {\n    x = 20;\n}\n\nint main() {\n    int x = 10;\n    change(x);\n    printf(\"%d\", x);\n}",
+            "category": "C",
+            "explanation": "C uses pass-by-value, so the caller's x remains 10.",
+            "options": [("A", "10", True), ("B", "20", False), ("C", "30", False), ("D", "Garbage value", False)]
+        },
+        {
+            "order": 7,
+            "title": "Q7. Python — *args",
+            "desc": "What is printed for args?",
+            "code": "def test(a, *args):\n    print(a)\n    print(args)\n\ntest(10, 20, 30)",
+            "category": "Python",
+            "explanation": "*args captures excess positional arguments as a tuple (20, 30).",
+            "options": [("A", "[20, 30]", False), ("B", "(20, 30)", True), ("C", "{20, 30}", False), ("D", "20, 30 as separate values", False)]
+        },
+        {
+            "order": 8,
+            "title": "Q8. Python — **kwargs",
+            "desc": "What is printed?",
+            "code": "def test(**kwargs):\n    print(len(kwargs))\n\ntest(a=10, b=20, c=30)",
+            "category": "Python",
+            "explanation": "**kwargs captures 3 keyword arguments into a dictionary of length 3.",
+            "options": [("A", "0", False), ("B", "2", False), ("C", "3", True), ("D", "Error", False)]
+        },
+        {
+            "order": 9,
+            "title": "Q9. Linked List",
+            "desc": "You have the head pointer of a singly linked list. Which operation can be performed in O(1) time?",
+            "code": None,
+            "category": "DSA",
+            "explanation": "Inserting a new node before head takes O(1) time by updating pointers.",
+            "options": [("A", "Search for a value", False), ("B", "Insert at the beginning", True), ("C", "Insert at the end without a tail pointer", False), ("D", "Find the middle element", False)]
+        },
+        {
+            "order": 10,
+            "title": "Q10. Binary Search",
+            "desc": "An array is sorted in ascending order:\n5 12 18 25 31 40 52\nUsing binary search, which element is checked first?",
+            "code": None,
+            "category": "Algorithms",
+            "explanation": "Mid index = (0 + 6) // 2 = 3, which holds 25.",
+            "options": [("A", "5", False), ("B", "18", False), ("C", "25", True), ("D", "40", False)]
+        },
+        {
+            "order": 11,
+            "title": "Q11. Hashing",
+            "desc": "A hash table uses h(k) = k % 10. Where will key 27 initially be placed?",
+            "code": None,
+            "category": "DSA",
+            "explanation": "27 % 10 = 7.",
+            "options": [("A", "Index 2", False), ("B", "Index 7", True), ("C", "Index 10", False), ("D", "Index 27", False)]
+        },
+        {
+            "order": 12,
+            "title": "Q12. Java — Default Array Value",
+            "desc": "What is printed?",
+            "code": "int[] a = new int[5];\n\na[2] = 10;\n\nSystem.out.println(a[0] + a[2]);",
+            "category": "Java",
+            "explanation": "Java primitive int arrays initialize to 0. a[0] = 0, a[2] = 10 -> 0 + 10 = 10.",
+            "options": [("A", "0", False), ("B", "10", True), ("C", "12", False), ("D", "Garbage value", False)]
+        },
+        {
+            "order": 13,
+            "title": "Q13. C++ — Constructor",
+            "desc": "If obj is declared and obj.show() is executed, what is printed?",
+            "code": "class A {\n    int x;\n\npublic:\n    A() {\n        x = 5;\n    }\n\n    void show() {\n        cout << x;\n    }\n};\n\nA obj;\nobj.show();",
+            "category": "C++",
+            "explanation": "Constructor sets x = 5, show() prints 5.",
+            "options": [("A", "0", False), ("B", "5", True), ("C", "Garbage value", False), ("D", "Compilation error", False)]
+        },
+        {
+            "order": 14,
+            "title": "Q14. OOP — Encapsulation",
+            "desc": "A programmer declares a variable balance as private and provides deposit() and withdraw() methods to modify it. Which OOP concept is primarily being used?",
+            "code": None,
+            "category": "OOP",
+            "explanation": "Hiding internal state behind public getter/setter methods is encapsulation.",
+            "options": [("A", "Inheritance", False), ("B", "Polymorphism", False), ("C", "Encapsulation", True), ("D", "Abstraction only", False)]
+        },
+        {
+            "order": 15,
+            "title": "Q15. Time Complexity",
+            "desc": "Consider:\nfor(int i = 0; i < n; i++)\n    printf(\"*\");\nIf n becomes twice as large, approximately how many times more iterations occur?",
+            "code": None,
+            "category": "Algorithms",
+            "explanation": "Linear complexity O(n) means doubling n doubles the iterations.",
+            "options": [("A", "Same number", False), ("B", "2 times", True), ("C", "4 times", False), ("D", "n times", False)]
+        },
+        {
+            "order": 16,
+            "title": "Q16. Python — Arguments",
+            "desc": "What is the output?",
+            "code": "def f(a, b=2, *args):\n    return a + b + sum(args)\n\nprint(f(1, 3, 4, 5))",
+            "category": "Python",
+            "explanation": "a=1, b=3, args=(4,5). 1 + 3 + 4 + 5 = 13.",
+            "options": [("A", "9", False), ("B", "10", False), ("C", "13", True), ("D", "15", False)]
+        },
+        {
+            "order": 17,
+            "title": "Q17. Operating Systems — Deadlock",
+            "desc": "Which statement is correct?",
+            "code": None,
+            "category": "OS",
+            "explanation": "Circular wait is one of Coffman's 4 necessary conditions for deadlock.",
+            "options": [("A", "Deadlock requires preemption", False), ("B", "Deadlock can occur only with one process", False), ("C", "Circular wait is one of the necessary conditions for deadlock", True), ("D", "Round Robin always causes deadlock", False)]
+        },
+        {
+            "order": 18,
+            "title": "Q18. Quicksort",
+            "desc": "Which statement is correct about Quicksort?",
+            "code": None,
+            "category": "Algorithms",
+            "explanation": "Quicksort has O(n log n) average time complexity and O(n²) worst-case time complexity.",
+            "options": [("A", "Its average-case complexity is O(n)", False), ("B", "Its average-case complexity is O(n log n), but its worst case can be O(n²)", True), ("C", "Its worst-case complexity is always O(n log n)", False), ("D", "Its complexity is always O(n²)", False)]
+        },
+        {
+            "order": 19,
+            "title": "Q19. Nested Loop",
+            "desc": "What is the time complexity?",
+            "code": "for(int i = 1; i <= n; i++) {\n    for(int j = 1; j <= i; j++) {\n        printf(\"*\");\n    }\n}",
+            "category": "Algorithms",
+            "explanation": "Summation 1 + 2 + ... + n = n(n+1)/2 = O(n²).",
+            "options": [("A", "O(n)", False), ("B", "O(log n)", False), ("C", "O(n log n)", False), ("D", "O(n²)", True)]
+        },
+        {
+            "order": 20,
+            "title": "Q20. Hashing — Collision",
+            "desc": "A hash table has size 7 and uses h(k) = k % 7 with linear probing. Insert: 10, 17, 24. Where will 24 be stored?",
+            "code": None,
+            "category": "DSA",
+            "explanation": "10 % 7 = 3 (idx 3). 17 % 7 = 3 (probes to idx 4). 24 % 7 = 3 (probes to idx 5).",
+            "options": [("A", "Index 2", False), ("B", "Index 3", False), ("C", "Index 4", False), ("D", "Index 5", True)]
+        }
+    ]
+
+    for item in mcqs_data:
+        existing_q = db.query(Question).filter(Question.round_id == 1, Question.order_index == item["order"]).first()
+        if not existing_q:
             q = Question(
                 round_id=1,
-                title=m["title"],
-                description=m["desc"],
-                code_snippet=m["code"],
-                category=m["category"],
-                marks=m["marks"],
-                negative_marks=0.25,
+                title=item["title"],
+                description=item["desc"],
+                code_snippet=item["code"],
+                category=item["category"],
+                marks=1.0,
+                negative_marks=0.0,
                 difficulty="Easy",
-                order_index=i
+                order_index=item["order"]
             )
             db.add(q)
             db.flush()
-            for opt_key, opt_text, is_corr in m["options"]:
+            for opt_key, opt_text, is_corr in item["options"]:
                 op = QuestionOption(
                     question_id=q.id,
                     option_key=opt_key,
@@ -260,88 +315,63 @@ def seed_database(db: Session):
                     is_correct=is_corr
                 )
                 db.add(op)
-        db.commit()
+        else:
+            # Update existing question attributes cleanly without deleting participant data
+            existing_q.title = item["title"]
+            existing_q.description = item["desc"]
+            existing_q.code_snippet = item["code"]
+            existing_q.category = item["category"]
+            existing_q.marks = 1.0
+            existing_q.negative_marks = 0.0
 
-    # 5. Seed Round 2 Debugging Problems (5 Problems)
-    if db.query(Question).filter(Question.round_id == 2).count() == 0:
-        debug_problems = [
-            {
-                "title": "Debug Python Array Sum Bug",
-                "desc": "Fix the buggy Python function that calculates the sum of all elements in an array. The current code has an off-by-one index error.",
-                "code": "def solve(arr):\n    total = 0\n    # BUG: Range goes up to len(arr) - 1, missing the last element!\n    for i in range(len(arr) - 1):\n        total += arr[i]\n    return total\n\nimport sys\nif __name__ == '__main__':\n    lines = sys.stdin.read().split()\n    if lines:\n        arr = [int(x) for x in lines]\n        print(solve(arr))\n",
-                "lang": "python",
-                "marks": 20.0,
-                "order": 1,
-                "sample_in": "1 2 3 4 5",
-                "sample_out": "15",
-                "test_cases": [
-                    ("1 2 3 4 5", "15", False),
-                    ("10 20 30", "60", True),
-                    ("-5 5 10", "10", True)
-                ]
-            },
-            {
-                "title": "Debug C Max Element Logic",
-                "desc": "Fix the C program below. The initial maximum is incorrectly set to 0, which fails when all array elements are negative.",
-                "code": "#include <stdio.h>\nint main() {\n    int n;\n    if (scanf(\"%d\", &n) != 1) return 0;\n    int arr[100];\n    for(int i = 0; i < n; i++) {\n        scanf(\"%d\", &arr[i]);\n    }\n    // BUG: int max_val = 0 fails for negative numbers!\n    int max_val = 0;\n    for(int i = 0; i < n; i++) {\n        if (arr[i] > max_val) max_val = arr[i];\n    }\n    printf(\"%d\\n\", max_val);\n    return 0;\n}\n",
-                "lang": "c",
-                "marks": 20.0,
-                "order": 2,
-                "sample_in": "3\n-10 -5 -20",
-                "sample_out": "-5",
-                "test_cases": [
-                    ("3\n-10 -5 -20", "-5", False),
-                    ("4\n1 9 3 4", "9", True),
-                    ("1\n-100", "-100", True)
-                ]
-            },
-            {
-                "title": "Debug C++ Reverse String Memory Bug",
-                "desc": "Fix the C++ code for reversing a string. The loop bound swaps characters twice, returning the original string unchanged.",
-                "code": "#include <iostream>\n#include <string>\n#include <algorithm>\nusing namespace std;\n\nint main() {\n    string s;\n    if (!(cin >> s)) return 0;\n    int n = s.length();\n    // BUG: Loop goes to n instead of n/2, swapping twice!\n    for (int i = 0; i < n; i++) {\n        swap(s[i], s[n - i - 1]);\n    }\n    cout << s << endl;\n    return 0;\n}\n",
-                "lang": "cpp",
-                "marks": 20.0,
-                "order": 3,
-                "sample_in": "code",
-                "sample_out": "edoc",
-                "test_cases": [
-                    ("code", "edoc", False),
-                    ("engineering", "gnireenigne", True),
-                    ("a", "a", True)
-                ]
-            },
-            {
-                "title": "Debug Java Factorial Zero Bug",
-                "desc": "Fix the Java Factorial program. Initializing the result variable to 0 causes all factorials to output 0.",
-                "code": "import java.util.Scanner;\npublic class Main {\n    public static void main(String[] args) {\n        Scanner sc = new Scanner(System.in);\n        if (!sc.hasNextInt()) return;\n        int n = sc.nextInt();\n        // BUG: int fact = 0 multiplies everything by zero!\n        long fact = 0;\n        for (int i = 1; i <= n; i++) {\n            fact *= i;\n        }\n        System.out.println(fact);\n    }\n}\n",
-                "lang": "java",
-                "marks": 20.0,
-                "order": 4,
-                "sample_in": "5",
-                "sample_out": "120",
-                "test_cases": [
-                    ("5", "120", False),
-                    ("1", "1", True),
-                    ("6", "720", True)
-                ]
-            },
-            {
-                "title": "Debug Python Palindrome Case-Sensitivity",
-                "desc": "Fix the Python palindrome checker function to handle case-insensitivity and ignore spaces.",
-                "code": "import sys\ndef is_palindrome(s):\n    # BUG: Does not convert to lowercase or strip spaces!\n    return s == s[::-1]\n\nif __name__ == '__main__':\n    s = sys.stdin.read().strip()\n    if is_palindrome(s):\n        print('YES')\n    else:\n        print('NO')\n",
-                "lang": "python",
-                "marks": 20.0,
-                "order": 5,
-                "sample_in": "Racecar",
-                "sample_out": "YES",
-                "test_cases": [
-                    ("Racecar", "YES", False),
-                    ("madam", "YES", True),
-                    ("hello", "NO", True)
-                ]
-            }
-        ]
-        for p in debug_problems:
+    db.commit()
+
+    # 5. Seed Round 2 Debugging Problems (3 Problems - Verbatim from Notepad File)
+    r2_problems = [
+        {
+            "order": 1,
+            "title": "Problem 1 — C: Find the Maximum",
+            "desc": "The program is intended to find the largest element in an array. Fix the bugs in the provided C code.",
+            "code": "#include <stdio.h>\n\nint main() {\n    int arr[] = {12, 45, 23, 67, 34};\n    int n = 5;\n    int max = 0;\n\n    for (int i = 0; i <= n; i++) {\n        if (arr[i] < max) {\n            max = arr[i];\n        }\n    }\n\n    printf(\"%d\", max);\n\n    return 0;\n}",
+            "lang": "c",
+            "marks": 10.0,
+            "sample_in": "",
+            "sample_out": "67",
+            "test_cases": [
+                ("", "67", False)
+            ]
+        },
+        {
+            "order": 2,
+            "title": "Problem 2 — Python: Count Even Numbers",
+            "desc": "The program should count how many even numbers are present in the list. Fix the bugs in the Python code.",
+            "code": "numbers = [3, 8, 12, 7, 10, 15]\ncount = 0\n\nfor i in range(len(numbers) - 1):\n    if numbers[i] % 2 == 1:\n        count += 1\n\nprint(\"Even numbers:\", count)",
+            "lang": "python",
+            "marks": 10.0,
+            "sample_in": "",
+            "sample_out": "Even numbers: 3",
+            "test_cases": [
+                ("", "Even numbers: 3", False)
+            ]
+        },
+        {
+            "order": 3,
+            "title": "Problem 3 — C++: Reverse an Array",
+            "desc": "The program should reverse the array. Identify and fix the indexing and loop termination bugs in C++.",
+            "code": "#include <iostream>\nusing namespace std;\n\nint main() {\n    int arr[] = {10, 20, 30, 40, 50};\n    int n = 5;\n\n    for (int i = 0; i < n / 2; i++) {\n        int temp = arr[i];\n        arr[i] = arr[n - i];\n        arr[n - i] = temp;\n    }\n\n    for (int i = 0; i <= n; i++) {\n        cout << arr[i] << \" \";\n    }\n\n    return 0;\n}",
+            "lang": "cpp",
+            "marks": 10.0,
+            "sample_in": "",
+            "sample_out": "50 40 30 20 10",
+            "test_cases": [
+                ("", "50 40 30 20 10", False)
+            ]
+        }
+    ]
+
+    for p in r2_problems:
+        existing_q = db.query(Question).filter(Question.round_id == 2, Question.order_index == p["order"]).first()
+        if not existing_q:
             q = Question(
                 round_id=2,
                 title=p["title"],
@@ -363,61 +393,71 @@ def seed_database(db: Session):
                     is_hidden=is_hid
                 )
                 db.add(tc)
-        db.commit()
+        else:
+            existing_q.title = p["title"]
+            existing_q.description = p["desc"]
+            existing_q.code_snippet = p["code"]
+            existing_q.language = p["lang"]
+            existing_q.marks = p["marks"]
 
-    # 6. Seed Round 3 Final Coding Problems (3 Problems: Easy, Medium, Hard)
-    if db.query(Question).filter(Question.round_id == 3).count() == 0:
-        coding_problems = [
-            {
-                "title": "Problem A: Two Sum Target",
-                "desc": "Given an array of integers `nums` and an integer `target`, return the 0-based indices of the two numbers such that they add up to target.\nInput format: First line contains N and Target. Second line contains N integers.\nOutput format: Print two space-separated indices in ascending order.",
-                "difficulty": "Easy",
-                "marks": 40.0,
-                "order": 1,
-                "lang": "python",
-                "sample_in": "4 9\n2 7 11 15",
-                "sample_out": "0 1",
-                "test_cases": [
-                    ("4 9\n2 7 11 15", "0 1", False),
-                    ("3 6\n3 2 4", "1 2", True),
-                    ("2 10\n5 5", "0 1", True),
-                    ("5 0\n-3 4 3 90 0", "0 2", True)
-                ]
-            },
-            {
-                "title": "Problem B: Longest Substring Without Repeating Characters",
-                "desc": "Given a string `s`, find the length of the longest substring without repeating characters.\nInput format: A single line string `s`.\nOutput format: Print an integer representing the maximum substring length.",
-                "difficulty": "Medium",
-                "marks": 50.0,
-                "order": 2,
-                "lang": "python",
-                "sample_in": "abcabcbb",
-                "sample_out": "3",
-                "test_cases": [
-                    ("abcabcbb", "3", False),
-                    ("bbbbb", "1", True),
-                    ("pwwkew", "3", True),
-                    ("abcdefg", "7", True)
-                ]
-            },
-            {
-                "title": "Problem C: Minimum Path Sum in Grid",
-                "desc": "Given an `m x n` grid filled with non-negative numbers, find a path from top left to bottom right, which minimizes the sum of all numbers along its path. You can only move either down or right at any point in time.\nInput format: First line contains `m` and `n`. Following `m` lines contain `n` integers each.\nOutput format: Print the minimum path sum.",
-                "difficulty": "Hard",
-                "marks": 60.0,
-                "order": 3,
-                "lang": "python",
-                "sample_in": "3 3\n1 3 1\n1 5 1\n4 2 1",
-                "sample_out": "7",
-                "test_cases": [
-                    ("3 3\n1 3 1\n1 5 1\n4 2 1", "7", False),
-                    ("2 3\n1 2 3\n4 5 6", "12", True),
-                    ("1 1\n5", "5", True),
-                    ("3 3\n1 2 5\n3 2 1\n4 1 1", "6", True)
-                ]
-            }
-        ]
-        for cp in coding_problems:
+    db.commit()
+
+    # 6. Seed Round 3 Final Coding Problems (2 Problems - Verbatim from Notepad File)
+    r3_problems = [
+        {
+            "order": 1,
+            "title": "Problem 1 — Second Largest Distinct Element",
+            "desc": "You are given an array containing N integers. Your task is to find the second largest distinct element in the array.\n\nA value is considered distinct only once. For example, in '10 20 20 15', the largest distinct element is 20, and the second largest distinct element is 15. If the array does not contain at least two different values, print -1.",
+            "difficulty": "Easy-Medium",
+            "marks": 20.0,
+            "lang": "python",
+            "input_format": "First line: An integer N representing the number of elements in the array.\nSecond line: N space-separated integers.",
+            "output_format": "Print a single integer representing the second largest distinct element. If no second largest distinct element exists, print -1.",
+            "constraints": "1 <= N <= 100000\n-10^9 <= A[i] <= 10^9",
+            "sample_in": "5\n10 5 20 8 15",
+            "sample_out": "15",
+            "test_cases": [
+                ("5\n10 5 20 8 15", "15", False),
+                ("6\n4 9 2 9 7 4", "7", False),
+                ("5\n8 8 8 8 8", "-1", False),
+                ("-10 -5 -20 -3 -8", "-5", True),
+                ("2\n100 50", "50", True),
+                ("1\n10", "-1", True),
+                ("7\n5 5 5 3 3 2 1", "3", True),
+                ("6\n-1 -5 -2 -8 -3 -2", "-3", True),
+                ("8\n100 90 80 100 70 90 60 50", "90", True)
+            ]
+        },
+        {
+            "order": 2,
+            "title": "Problem 2 — Count Vowels",
+            "desc": "You are given a string containing English letters and spaces. Your task is to count the total number of vowels present in the string.\n\nThe vowels are: a, e, i, o, u. Both uppercase and lowercase vowels must be counted. Each occurrence of a vowel is counted separately. Spaces are ignored. If there are no vowels, print 0.",
+            "difficulty": "Medium",
+            "marks": 30.0,
+            "lang": "python",
+            "input_format": "The input contains one line containing the string.",
+            "output_format": "Print a single integer representing the total number of vowels.",
+            "constraints": "1 <= length of string <= 100000",
+            "sample_in": "Engineering",
+            "sample_out": "4",
+            "test_cases": [
+                ("Engineering", "4", False),
+                ("HELLO WORLD", "3", False),
+                ("rhythm", "0", False),
+                ("Artificial Intelligence", "9", True),
+                ("I Love Coding", "5", True),
+                ("Programming", "3", True),
+                ("AEIOU", "5", True),
+                ("aeiou", "5", True),
+                ("XYZ", "0", True),
+                ("A quick brown fox", "5", True)
+            ]
+        }
+    ]
+
+    for cp in r3_problems:
+        existing_q = db.query(Question).filter(Question.round_id == 3, Question.order_index == cp["order"]).first()
+        if not existing_q:
             q = Question(
                 round_id=3,
                 title=cp["title"],
@@ -426,6 +466,9 @@ def seed_database(db: Session):
                 marks=cp["marks"],
                 order_index=cp["order"],
                 language=cp["lang"],
+                input_format=cp.get("input_format"),
+                output_format=cp.get("output_format"),
+                constraints=cp.get("constraints"),
                 sample_input=cp["sample_in"],
                 sample_output=cp["sample_out"]
             )
@@ -439,6 +482,13 @@ def seed_database(db: Session):
                     is_hidden=is_hid
                 )
                 db.add(tc)
-        db.commit()
+        else:
+            existing_q.title = cp["title"]
+            existing_q.description = cp["desc"]
+            existing_q.marks = cp["marks"]
+            existing_q.input_format = cp.get("input_format")
+            existing_q.output_format = cp.get("output_format")
+            existing_q.constraints = cp.get("constraints")
 
-    log_event("DATABASE_SEEDED", "Contest seed data initialized successfully.")
+    db.commit()
+    log_event("DATABASE_SEEDED", "Contest dataset initialized/updated cleanly.")

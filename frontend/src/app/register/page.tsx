@@ -68,6 +68,7 @@ export default function RegisterPage() {
               type="text"
               name="full_name"
               required
+              minLength={2}
               value={formData.full_name}
               onChange={handleChange}
               placeholder="John Doe"
@@ -94,6 +95,8 @@ export default function RegisterPage() {
               type="tel"
               name="mobile_number"
               required
+              minLength={10}
+              maxLength={15}
               value={formData.mobile_number}
               onChange={handleChange}
               placeholder="9876543210"
@@ -107,6 +110,7 @@ export default function RegisterPage() {
               type="text"
               name="prn_student_id"
               required
+              minLength={2}
               value={formData.prn_student_id}
               onChange={handleChange}
               placeholder="PRN2026101"
@@ -120,6 +124,7 @@ export default function RegisterPage() {
               type="text"
               name="college_name"
               required
+              minLength={2}
               value={formData.college_name}
               onChange={handleChange}
               placeholder="College of Engineering & Technology"
